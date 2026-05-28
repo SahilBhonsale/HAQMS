@@ -13,13 +13,16 @@ export default function QueueMonitor() {
   const [refreshCount, setRefreshCount] = useState(0);
 
   // HARDCODED API BASE URL: Duplicated from AuthContext (code duplication smell)
-  const API_BASE_URL = 'http://localhost:5000/api';
+  const API_BASE_URL = 'http://localhost:5001/api';
 
   const fetchQueueData = async () => {
     try {
       // Insecure: Fetches queue without checking credentials (it's a public dashboard, which is fine, 
       // but it uses the hardcoded API domain)
-      const res = await fetch(`${API_BASE_URL}/queue`);
+      const token = localStorage.getItem("haqms_token");
+      const res = await fetch(`${API_BASE_URL}/queue`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) {
         throw new Error('Failed to retrieve active token queue.');
       }
@@ -38,20 +41,18 @@ export default function QueueMonitor() {
     // Initial fetch
     fetchQueueData();
 
-    // MEMORY LEAK BUG:
-    // This setInterval has NO cleanup function (does not return clearInterval).
-    // Every time this page is mounted, a new background polling timer is spun up.
-    // If the candidate navigates between Dashboard and Queue multiple times,
-    // dozens of parallel intervals will poll the database, causing memory bloat,
-    // state update crashes on unmounted components, and heavy server load.
+    // FIX: Memory leak — original setInterval had no cleanup function.
+    // Every time the /queue page was mounted, a new polling interval was created.
+    // Navigating away and back repeatedly spawned dozens of parallel intervals,
+    // causing memory bloat, server hammering, and React "state update on unmounted
+    // component" warnings/crashes.
+    // Fix: return the cleanup function so React calls clearInterval on unmount.
     const intervalId = setInterval(() => {
-      console.log(`[POLL] Active Queue Poll #${refreshCount + 1} firing...`);
       fetchQueueData();
       setRefreshCount((prev) => prev + 1);
     }, 3000);
 
-    // Junior Developer Note: "Interval created, will run forever to keep dashboard fully synced!"
-    // Missing: return () => clearInterval(intervalId);
+    return () => clearInterval(intervalId);
   }, []); // Note that refreshCount dependency is missing too, causing stale closure on log!
 
   // Group tokens by doctor
